@@ -3,11 +3,17 @@ POSTGRE SQL DBA EĞİTİMİ
 VAGRANT nedir? VirtualBox ile uyumlu imiş.
 YArdımcı bilgiler postgresql için http://www.interdb.jp/pg/pgsql01.html
 
-1.  KURULUM KOMUTLARI
+1.  KURULUM KOMUTALRI
 
-https://www.postgresql.org/download/linux/redhat/ sitesine gidip indirilebilir.
-yum install https://download.postgresql.org/pub/repos/yum/11/redhat/rhel-7-x86_64/pgdg-centos11-11-2.noarch.rpm
+https://www.postgresql.org/download/linux/redhat/ sitesine gidip rpm ve
+
+aa kullanıcı adı 
+Sifre: Ankara12345**
+
+2. yum install https://download.postgresql.org/pub/repos/yum/11/redhat/rhel-7-x86_64/pgdg-centos11-11-2.noarch.rpm
+
 yum install postgresql
+
 yum install postgresql11-server
 
 /usr/pgsql-11/bin/postgresql-11-setup initdb
@@ -268,6 +274,43 @@ help anlamına gelir
 ile ilgili tüm komutları gösterir.
 \d
 Describe anlamına gelir
+
+
+17. SQL Tuning, sorgularının planlarına bakılması
+Google üzerinde Postgre explain plan diyerek görsel olarak bunu verecelk siteler var 
+
+postgres=# explain select count(*) from sayi;
+                                       QUERY PLAN
+
+--------------------------------------------------------------------------------
+---------
+ Finalize Aggregate  (cost=58799.21..58799.22 rows=1 width=8)
+   ->  Gather  (cost=58799.00..58799.21 rows=2 width=8)
+         Workers Planned: 2
+         ->  Partial Aggregate  (cost=57799.00..57799.01 rows=1 width=8)
+               ->  Parallel Seq Scan on sayi  (cost=0.00..51549.00 rows=2500000
+width=0)
+(5 rows)
+
+postgres=# explain (analyze) select count(*) from sayi;
+                                                                QUERY PLAN
+
+--------------------------------------------------------------------------------
+-----------------------------------------------------------
+ Finalize Aggregate  (cost=58799.21..58799.22 rows=1 width=8) (actual time=1759.
+312..1759.313 rows=1 loops=1)
+   ->  Gather  (cost=58799.00..58799.21 rows=2 width=8) (actual time=1756.744..1
+759.431 rows=3 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         ->  Partial Aggregate  (cost=57799.00..57799.01 rows=1 width=8) (actual
+ time=1734.485..1734.486 rows=1 loops=3)
+               ->  Parallel Seq Scan on sayi  (cost=0.00..51549.00 rows=2500000
+width=0) (actual time=0.040..931.428 rows=2000000 loops=3)
+ Planning Time: 0.110 ms
+ Execution Time: 1759.482 ms
+(8 rows)
+
 
 17. Database versiyon kontrol sistemi 
 https://www.liquibase.org/
