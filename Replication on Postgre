@@ -1,0 +1,220 @@
+REPLİKASYON
+--vooscreen  -->>Film dil öğrenme
+--duolingo -->> dil öğrenme
+1. Primary üzerinden 
+
+-bash-4.2$ cat postgresql.auto.conf 
+dosyasının içerisine girip  aşağıdaki satırlar girilir. Burada kritik nokta auto.conf dosyasında bu tür değişiklikler yaptıktan son SQL tarafında herhangi bir alter system gibi bir komut vermeden önce database'i reload veya restart yapmak gereklidir. 
+
+
+wal_level = replica
+max_wal_senders = 8
+wal_keep_segments = 100
+max_replication_slots = 2
+
+2.  Primary üzerinden hba_conf dosyasına aşağıdaki ekleme yapıldı.
+cat pg_hba.conf
+# TYPE  DATABASE        USER            ADDRESS                 METHOD
+
+# "local" is for Unix domain socket connections only
+local   all             all                                    trust
+# IPv4 local connections:
+host    all             all             127.0.0.1/32           trust
+host    all             all             192.168.56.101/32      trust
+host    all             all             127.0.0.1/32           md5
+# IPv6 local connections:
+host    all             all             ::1/128                 md5
+# Allow replication connections from localhost, by a user with the
+# replication privilege.
+local   replication     all                                     md5
+host    replication     all             127.0.0.1/32            ident
+host    replication     all             ::1/128                 ident
+host    replication     all             0.0.0.0/0               trust --->>Bu satır eklendir 
+
+
+3. Primary üzerinden VT üzerinde 
+postgres=# \x  -->> Extended display ile görünüm güzelleştirilebilir.
+postgres=# select pg_create_physical_replication_slot('ab2019',true);
+ pg_create_physical_replication_slot
+-------------------------------------
+ (ab2019,0/18D55850)
+(1 row)
+
+4. Primary üzerinden;
+postgres=# select * from pg_replication_slots;
+ slot_name | plugin | slot_type | datoid | database | temporary | active | activ
+e_pid | xmin | catalog_xmin | restart_lsn | confirmed_flush_lsn
+-----------+--------+-----------+--------+----------+-----------+--------+------
+------+------+--------------+-------------+---------------------
+ ab2019    |        | physical  |        |          | f         | f      |
+      |      |              | 0/18D55850  |
+(1 row)
+
+4.Bu komut standby üzerinden verilir.
+Burada aşağıdaki ip adresi primary ninkidir. 
+Dizin ise standby in dizinidir. Yani master dan aldığım kopyayı standby üzerinde nereye  koyacağını söylemek için yazıldı. 
+
+pg_basebackup -h 192.168.43.202 -p 5432 -U postgres -D /var/lib/pgsql/11/data -R -S ab2019 -X stream -P -v > log 2>&1; date;
+
+5. Replication yaptıktan sonra recovery.conf dosyasında standby database de aşağıdaki komut verilerek bakılabilir.
+
+cat /var/lib/pgsql/11/data/recovery.conf
+
+
+standby_mode = 'on'
+primary_conninfo = 'user=postgres passfile=''/var/lib/pgsql/.pgpass'' host=192.168.43.202 port=5432 sslmode=prefer sslcompression=0 krbsrvname=postgres target_session_attrs=any'
+primary_slot_name = 'ab2019'
+
+6. Replication işlemini birden fazla farklı makinelere yapabiliriz. Fakat primary üzerinde yeni slot yaratmak zorundayız. 
+
+select pg_create_physical_replication_slot('ab2019',true);
+
+6. Ana makine üzerinde tekrar replicakston yapma
+
+postgres=# select pg_create_physical_replication_slot('lokal',true);
+ pg_create_physical_replication_slot
+-------------------------------------
+ (lokal,0/1A000060)
+(1 row)
+
+Aynı makine üzerinde abdata klasörü kurarak replikasyon yaptık.
+
+
+-bash-4.2$ pg_basebackup -h 192.168.43.202 -p 5432 -U postgres -D /var/lib/pgsql/11/abdata -R -S lokal -X stream -P -v --tablespace-mapping=/var/lib/pgsql/11/temp=/var/lib/pgsql/11/abtemp
+
+pg_basebackup: initiating base backup, waiting for checkpoint to complete
+pg_basebackup: checkpoint completed
+pg_basebackup: write-ahead log start point: 0/1B000028 on timeline 1
+pg_basebackup: starting background WAL receiver
+269106/269106 kB (100%), 2/2 tablespaces                                        
+pg_basebackup: write-ahead log end point: 0/1B0000F8
+pg_basebackup: waiting for background process to finish streaming ...
+pg_basebackup: base backup completed
+
+Temp tablespace aynı makine üzeirnde kullanıldığı için temp tablespace ini maplemek zorunda kaldık. 
+
+
+7. Bundan sonra replica database çalıştırılır
+/usr/pgsql-11/bin/pg-ctl -D /var/lib/pgsql/11/abdata/ start
+
+waiting for server to start....2019-02-10 19:04:10.567 +03 [13196] LOG:  listening on IPv4 address "0.0.0.0", port 5433
+2019-02-10 19:04:10.567 +03 [13196] LOG:  listening on IPv6 address "::", port 5433
+2019-02-10 19:04:10.569 +03 [13196] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5433"
+2019-02-10 19:04:10.572 +03 [13196] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5433"
+2019-02-10 19:04:10.592 +03 [13196] LOG:  redirecting log output to logging collector process
+2019-02-10 19:04:10.592 +03 [13196] HINT:  Future log output will appear in directory "log".
+ done
+server started
+
+
+[root@localhost ~]# ps -fe | grep postgre
+postgres 11075     1  0 17:03 ?        00:00:00 /usr/pgsql-11/bin/postmaster -D /var/lib/pgsql/11/data/
+postgres 11077 11075  0 17:03 ?        00:00:00 postgres: logger
+postgres 11079 11075  0 17:03 ?        00:00:00 postgres: checkpointer
+postgres 11080 11075  0 17:03 ?        00:00:00 postgres: background writer
+postgres 11081 11075  0 17:03 ?        00:00:00 postgres: walwriter
+postgres 11082 11075  0 17:03 ?        00:00:00 postgres: autovacuum launcher
+postgres 11083 11075  0 17:03 ?        00:00:01 postgres: stats collector
+postgres 11084 11075  0 17:03 ?        00:00:00 postgres: logical replication launcher
+root     11347  9294  0 17:18 pts/6    00:00:00 su - postgres
+postgres 11348 11347  0 17:18 pts/6    00:00:00 -bash
+postgres 12185 11075  0 18:13 ?        00:00:00 postgres: walsender postgres 192.168.43.212(45558) streaming 0/1C000140
+postgres 13196     1  0 19:04 pts/0    00:00:00 /usr/pgsql-11/bin/postgres -D /var/lib/pgsql/11/abdata
+
+
+
+8. Log dosyaları 
+cd /var/lib/pgsql/11/abdata/log
+
+-bash-4.2$ ll
+total 68
+-rw-------. 1 postgres postgres  2388 Feb 10 18:51 postgresql-Sat.log
+-rw-------. 1 postgres postgres 62926 Feb 10 18:51 postgresql-Sun.log
+
+11/abdata/postgresql.conf içerisinde loglama ile ilgili tüm ayarlar yapılabilir. 
+
+
+12. postgres=# select pg_is_in_recovery();
+ pg_is_in_recovery
+-------------------
+ f
+(1 row)
+
+false demek master, true demek standby 
+
+
+13. Her ikisinin de aynı transaction logunu işlediğini öğrenebiliriez. Bunu restart_lsn a bakarak görürüz.
+\x
+postgres=# select * from pg_replication_slots ;
+-[ RECORD 1 ]-------+-----------
+slot_name           | ab2019
+plugin              |
+slot_type           | physical
+datoid              |
+database            |
+temporary           | f
+active              | t
+active_pid          | 12185
+xmin                |
+catalog_xmin        |
+restart_lsn         | 0/1C000140
+confirmed_flush_lsn |
+-[ RECORD 2 ]-------+-----------
+slot_name           | lokal
+plugin              |
+slot_type           | physical
+datoid              |
+database            |
+temporary           | f
+active              | t
+active_pid          | 13203
+xmin                |
+catalog_xmin        |
+restart_lsn         | 0/1C000140
+confirmed_flush_lsn |
+
+
+14. REPLİKA ve MASTER ın durumu nedir? Bunu görmek için. Ne kadar gönddrdi, ne kadar geride...
+postgres=# select * from pg_stat_replication ;
+-[ RECORD 1 ]----+------------------------------
+pid              | 12185
+usesysid         | 10
+usename          | postgres
+application_name | walreceiver
+client_addr      | 192.168.43.212
+client_hostname  |
+client_port      | 45558
+backend_start    | 2019-02-10 18:13:28.23588+03
+backend_xmin     |
+state            | streaming
+sent_lsn         | 0/1C000140
+write_lsn        | 0/1C000140
+flush_lsn        | 0/1C000140
+replay_lsn       | 0/1C000140
+write_lag        |
+flush_lag        |
+replay_lag       |
+sync_priority    | 0
+sync_state       | async
+-[ RECORD 2 ]----+------------------------------
+pid              | 13203
+usesysid         | 10
+usename          | postgres
+application_name | walreceiver
+client_addr      | 192.168.43.202
+client_hostname  |
+client_port      | 60852
+backend_start    | 2019-02-10 19:04:10.813805+03
+backend_xmin     |
+state            | streaming
+sent_lsn         | 0/1C000140
+write_lsn        | 0/1C000140
+flush_lsn        | 0/1C000140
+replay_lsn       | 0/1C000140
+write_lag        |
+flush_lag        |
+
+
+
+
+
